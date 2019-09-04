@@ -1,34 +1,20 @@
 #!/usr/bin/python3
 
-import sys
-import os
-import base64
+import sys, os, base64, hashlib
 from bs4 import BeautifulSoup, Tag, Doctype, CData
 from lxml import etree
 from lxml.etree import CDATA
 from PIL import Image
-import hashlib
-from pprint import pprint
-
-
-# "/home/jjon/Projects/DT2enex/B minor/Molly McAlpin - Carolan's Dream.html"
-html = "/home/jjon/Projects/DT2enex/Popper/Karl Popper By Philip Catton, Graham Macdonald.html"
-# "/home/jjon/Projects/DT2enex/Popper/Karl Popper.html"
-#"/home/jjon/Projects/DT2enex/DTTestOut/Edor/Swallowtail.html"
-
 
 def guess_type(filepath):
     try:
-        import magic  # python-magic
+        import magic  # I havn't got python-magic
         return magic.from_file(filepath, mime=True)
     except ImportError:
         import mimetypes
         return mimetypes.guess_type(filepath)[0]
 
 def file_to_base64(filepath):
-    """
-    go back to old version returning only the base64 block. Get the imghash in generateCData 
-    """
     import base64
     with open(filepath, 'rb') as f:
         buff = f.read()
@@ -38,17 +24,19 @@ def file_to_base64(filepath):
 
 def generateCData(htmlIn):
     """
-    This should return noteProps and a CDATA string.
+    This returns noteProps, and html soup to be reduced to a CData string.
     Meta-ToDo: Maybe this should be a method in a class with methods to handle different resource types?
     ToDo: This'll work for img tags but we're going to have to make it more general to handle resources other than images.
     ToDo: It'd be good to replace any <a href="evernote:///view..."s with URLs that Joplin can make something of.
     ToDo: remember to strip out disallowed tags and/or attributes.
+    ToDo: return title as a string instead of an item in noteProps?
     """
     basepath, htmlfilename = os.path.split(htmlIn.rstrip(os.path.sep))
+    #print(htmlfilename)
     soup = BeautifulSoup(open(htmlIn, 'r'), 'xml')
+
     noteProps = {'note-title': soup.find('title').text}
     for img in soup.find_all("img"):
-
         # assemble image properties
         img_path = basepath + img['src'][1:]
         pic = Image.open(img_path)
@@ -70,10 +58,8 @@ def generateCData(htmlIn):
             'data': base64block
         }
 
-
-
     # ToDo: more soup tinkering to create the CData string
-    for t in soup:
+    for t in soup: # do I need this loop?
         if isinstance(t, Doctype):
             t.replaceWith(Doctype('en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd"'))
     soup.html.unwrap()
@@ -83,25 +69,19 @@ def generateCData(htmlIn):
     return soup, noteProps
 
 
-enex = etree.Element("en-export", {"export-date":"20190731T001813Z", "application": "Devonthink"})
-
 def generateNoteElement(html,enex):
-    """
-    ToDo: create enex xml and insert CData string
-    """
     soup, noteProps = generateCData(html)
-    
     note = etree.SubElement(enex, "note")
     title = etree.SubElement(note, 'title').text = noteProps['note-title']
     content = etree.SubElement(note, "content").text = CDATA(str(soup))
-    etree.SubElement(note, "created").text = "20161113T034919Z"
+    etree.SubElement(note, "created").text = "20161113T034919Z" #todo: replace dummy datetimes
     etree.SubElement(note, "updated").text = "20170725T213730Z"
-    natt = etree.SubElement(note, "note-attributes")
-    etree.SubElement(natt, 'author').text = "Jon Crump"
+    nattrs = etree.SubElement(note, "note-attributes")
+    etree.SubElement(nattrs, 'author').text = "Jon Crump"
 
     for x in noteProps:
+        d = noteProps[x]
         if x != 'note-title':
-            d = noteProps[x]
             resource = etree.SubElement(note, "resource")
             etree.SubElement(resource, "data", encoding="base64").text = d['data']
             etree.SubElement(resource, "mime").text= d['type']
@@ -111,11 +91,26 @@ def generateNoteElement(html,enex):
             ratt = etree.SubElement(resource, "resource-attributes")
             etree.SubElement(ratt, 'file-name').text = d['filename']
    
-generateNoteElement(html,enex)
 
-with open("/home/jjon/Projects/DT2enex/testfile.enex", 'w+') as testfile:
-    testfile.write(etree.tostring(enex, xml_declaration=True, encoding="UTF-8", doctype='<!DOCTYPE en-export SYSTEM "http://xml.evernote.com/pub/evernote-export3.dtd">', pretty_print=False).decode("utf-8"))
+########## wrap the code below in main():
 
+# Creat the .enex xml file. Each note derived from an html file will be added to it
+enex = etree.Element("en-export", {"export-date":"20190731T001813Z", "application": "Devonthink"})
 
-#print(etree.tostring(enex, xml_declaration=True, encoding="UTF-8", doctype='<!DOCTYPE en-export SYSTEM "http://xml.evernote.com/pub/evernote-export3.dtd">', pretty_print=False))
-#print(generateEnex(html))
+for root, dirs, files in os.walk("DTFolders"):
+    # exclude hidden files
+    files = [f for f in files if not f[0] == '.']
+    #dirs[:] is a nice trick to prevent recursion into hidden directories
+    dirs[:] = [d for d in dirs if not d[0] == '.']
+    
+    for file in files:
+        if file.endswith("html"):
+             generateNoteElement(F"{root + os.path.sep + file}", enex)
+             # Python3 string formatting!!
+
+with open("/home/jjon/Projects/DT2enex/bigtest.enex", 'w+') as testfile:
+    testfile.write(etree.tostring(enex,
+        xml_declaration=True, 
+        encoding="UTF-8", 
+        doctype='<!DOCTYPE en-export SYSTEM "http://xml.evernote.com/pub/evernote-export3.dtd">', 
+        pretty_print=False).decode("utf-8"))
