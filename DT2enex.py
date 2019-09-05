@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup, Tag, Doctype, CData
 from lxml import etree
 from lxml.etree import CDATA
 from PIL import Image
+from datetime import datetime as dt
 
 def guess_type(filepath):
     try:
@@ -32,9 +33,7 @@ def generateCData(htmlIn):
     ToDo: return title as a string instead of an item in noteProps?
     """
     basepath, htmlfilename = os.path.split(htmlIn.rstrip(os.path.sep))
-    #print(htmlfilename)
     soup = BeautifulSoup(open(htmlIn, 'r'), 'xml')
-
     noteProps = {'note-title': soup.find('title').text}
     for img in soup.find_all("img"):
         # assemble image properties
@@ -68,14 +67,13 @@ def generateCData(htmlIn):
 
     return soup, noteProps
 
-
 def generateNoteElement(html,enex):
     soup, noteProps = generateCData(html)
     note = etree.SubElement(enex, "note")
     title = etree.SubElement(note, 'title').text = noteProps['note-title']
     content = etree.SubElement(note, "content").text = CDATA(str(soup))
-    etree.SubElement(note, "created").text = "20161113T034919Z" #todo: replace dummy datetimes
-    etree.SubElement(note, "updated").text = "20170725T213730Z"
+    etree.SubElement(note, "created").text = f"{dt.utcnow().strftime('%Y%m%dT%H%M%SZ')}" #todo: replace dummy datetimes
+    etree.SubElement(note, "updated").text = f"{dt.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
     nattrs = etree.SubElement(note, "note-attributes")
     etree.SubElement(nattrs, 'author').text = "Jon Crump"
 
@@ -88,29 +86,45 @@ def generateNoteElement(html,enex):
             etree.SubElement(resource, "width").text= d['width']
             etree.SubElement(resource, "height").text= d['height']
 
-            ratt = etree.SubElement(resource, "resource-attributes")
-            etree.SubElement(ratt, 'file-name').text = d['filename']
+            rattrs = etree.SubElement(resource, "resource-attributes")
+            etree.SubElement(rattrs, 'file-name').text = d['filename']
    
-
-########## wrap the code below in main():
-
-# Creat the .enex xml file. Each note derived from an html file will be added to it
-enex = etree.Element("en-export", {"export-date":"20190731T001813Z", "application": "Devonthink"})
-
-for root, dirs, files in os.walk("DTFolders"):
-    # exclude hidden files
-    files = [f for f in files if not f[0] == '.']
-    #dirs[:] is a nice trick to prevent recursion into hidden directories
-    dirs[:] = [d for d in dirs if not d[0] == '.']
     
-    for file in files:
-        if file.endswith("html"):
-             generateNoteElement(F"{root + os.path.sep + file}", enex)
-             # Python3 string formatting!!
+def main(DTFolders, OUTfile):
+    # Create the .enex xml file. Each <note> element derived from an html file will be added to it.
+    enex = etree.Element(
+        "en-export",
+        {"export-date":f"{dt.utcnow().strftime('%Y%m%dT%H%M%SZ')}", 
+        "application": "Devonthink"}
+    )
 
-with open("/home/jjon/Projects/DT2enex/bigtest.enex", 'w+') as testfile:
-    testfile.write(etree.tostring(enex,
-        xml_declaration=True, 
-        encoding="UTF-8", 
-        doctype='<!DOCTYPE en-export SYSTEM "http://xml.evernote.com/pub/evernote-export3.dtd">', 
-        pretty_print=False).decode("utf-8"))
+    for root, dirs, files in os.walk(DTFolders):
+        # exclude hidden files
+        files = [f for f in files if not f[0] == '.']
+
+        #dirs[:] is a nice trick to prevent recursion into hidden directories: it
+        #replaces the *elements* of the list with directory names matching the
+        #criteria, not the name for the list.
+        dirs[:] = [d for d in dirs if not d[0] == '.']
+        
+        for file in files:
+            if file.endswith("html"):
+                 generateNoteElement(f"{root + os.path.sep + file}", enex)
+                 # Python3 string formatting!!
+
+    with open(OUTfile, 'w+') as testfile:
+        testfile.write(etree.tostring(enex,
+            xml_declaration=True, 
+            encoding="UTF-8", 
+            doctype='<!DOCTYPE en-export SYSTEM "http://xml.evernote.com/pub/evernote-export3.dtd">', 
+            pretty_print=True).decode("utf-8"))
+
+if __name__ == '__main__':
+    if len(sys.argv) != 3:
+        sys.exit("usage: $python3 DT2enex.py <directory of DT html files with associated resources> <outfile.enex>")
+    else:
+        indir = sys.argv[1]
+        outfile = sys.argv[2]
+        if outfile[-5:] != '.enex':
+            outfile = outfile + '.enex'
+        main(indir,outfile)
